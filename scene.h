@@ -85,7 +85,7 @@ struct mesh {
     void build_BVH() {
         nodes.clear();
         if (triangles.empty()) {
-            is_bvh_built = true;
+            // is_bvh_built = false;
             return;
         }
 
@@ -231,7 +231,7 @@ struct scene {
         int count = end - start;
         if (count == 1) {
             nodes[node_idx].left_idx = LEAF_NODE;
-            nodes[node_idx].right_idx = -1;
+            nodes[node_idx].right_idx = LEAF_NODE;
             nodes[node_idx].prim_type = prims[start].type;
             nodes[node_idx].prim_index = prims[start].index;
             return node_idx;
@@ -281,10 +281,12 @@ struct scene {
             prims.push_back({ b,PRIM_TRIANGLE, i });
         }
         for (int i = 0; i < (int)instances.size(); ++i) {
-            // 实例的包围盒需要变换
-            aabb local_bounds = prototypes[instances[i].mesh_index].get_aabb();
+            
+            const mesh& proto = prototypes[instances[i].mesh_index];
             // 避免未构建BVH的mesh
-            if (local_bounds.min.x() > local_bounds.max.x())continue;
+            if (!proto.is_bvh_built)continue;
+            // 实例的包围盒需要变换
+            aabb local_bounds = proto.get_aabb();
             
             aabb world_bounds;
             // 重新求包围盒
@@ -295,6 +297,11 @@ struct scene {
                 world_bounds.expand(instances[i].transform.transform_point(pt));
             }
             prims.push_back({ world_bounds,PRIM_INSTANCE, i });
+        }
+
+        if (prims.empty()) {
+            is_bvh_built = true;
+            return;
         }
 
         // 预分配节点空间
