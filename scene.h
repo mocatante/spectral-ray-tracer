@@ -209,7 +209,15 @@ struct scene {
     void add(const sphere& s) { spheres.push_back(s); is_bvh_built = false; }
     void add(const quad& q) { quads.push_back(q); is_bvh_built = false; }
     void add(const triangle& t) { triangles.push_back(t); is_bvh_built = false; }
-    void add_mesh(const mesh& m) { prototypes.push_back(m); }
+    // 注意返回索引
+    // 在scene中, mesh仅作为资产
+    // instance需要明确指向一个mesh
+    // 对应关系需要在scene外部维护
+    int add_mesh(const mesh& m) {
+        int idx = (int)prototypes.size();
+        prototypes.push_back(m);
+        return idx;
+    }
     void add_instance(const instance& inst) {instances.push_back(inst);is_bvh_built = false;}
 
     int build_recursive(std::vector<scene_prim_ref>& prims, int start, int end) {

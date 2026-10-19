@@ -46,11 +46,9 @@ inline void render_cornell() {
     box1.build_BVH();
     box2.build_BVH();
 
-    world.add_mesh(box1);
-    world.add_mesh(box2);
 
     instance inst1;
-    inst1.mesh_index = 0;
+    inst1.mesh_index = world.add_mesh(box1);
     mat4 r1 = mat4::rotate_y(-15);
     mat4 t1 = mat4::translate(265, 0, 295);
     inst1.transform = t1 * r1;
@@ -59,7 +57,7 @@ inline void render_cornell() {
     world.add_instance(inst1);
 
     instance inst2;
-    inst2.mesh_index = 1;
+    inst2.mesh_index = world.add_mesh(box2);
     mat4 r2 = mat4::rotate_y(18);
     mat4 t2 = mat4::translate(130, 0, 65);
     inst2.transform = t2 * r2;
