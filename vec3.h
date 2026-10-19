@@ -45,8 +45,10 @@ struct vec3 {
 	}
 
     vec3 normalize() const {
-        float len = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
-		return vec3(v[0], v[1], v[2]) / len;
+        float len_sq = v[0] * v[0] + v[1] * v[1] + v[2] * v[2];
+        if (len_sq < 1e-20f) return vec3(0.0f, 0.0f, 0.0f);
+        float inv_len = 1.0f / std::sqrt(len_sq);
+        return vec3(v[0], v[1], v[2])* inv_len;
 	}
 };
 

@@ -41,10 +41,6 @@ struct SpectralColor {
         return kWavelengthMinNm + channelIndex * kWavelengthStepNm;
     }
 
-    // 累积样本到 XYZ
-    static void accumulateXYZ(vec3& xyz, int channelIndex, float spectralRadiance) {
-        xyz = xyz + kXYZWeights5nm[channelIndex] * spectralRadiance;
-    }
 
     // XYZ 转 线性sRGB
     static vec3 xyzToLinearSRGB(const vec3& xyz) {

@@ -23,10 +23,18 @@ struct aabb {
 
     bool hit(const ray& r, float t_min, float t_max) const {
         for (int a = 0; a < 3; ++a) {
-            float invD = 1.0f / r.direction[a];
-            float t0 = (min[a] - r.origin[a]) * invD;
-            float t1 = (max[a] - r.origin[a]) * invD;
+            float o = r.origin[a];
+            float d = r.direction[a];
 
+            if (std::abs(d) < 1e-8f) {
+                // 光线平行
+                if (o < min[a] || o > max[a]) return false;
+                continue;
+            }
+
+            float invD = 1.0f / d;
+            float t0 = (min[a] - o) * invD;
+            float t1 = (max[a] - o) * invD;
             if (invD < 0.0f) std::swap(t0, t1);
 
             t_min = t0 > t_min ? t0 : t_min;
@@ -120,8 +128,8 @@ struct quad {
     vec3 u, v;
 
     vec3 normal;
-    float u_len_sq;
-    float v_len_sq;
+    vec3  n_raw;
+    float inv_n_sq;
     float d;
 
 	material mat;
@@ -134,9 +142,17 @@ struct quad {
     }
 
     void finalize() {
-        normal = u.cross(v).normalize();
-        u_len_sq = u.dot(u);
-        v_len_sq = v.dot(v);
+        n_raw = u.cross(v);
+        float n_sq = n_raw.dot(n_raw);
+        if (n_sq < 1e-20f) {
+            // u 与 v 平行, 令inv_n_sq = 0, hit 直接拒绝
+            normal = vec3(0.0f, 0.0f, 1.0f);
+            inv_n_sq = 0.0f;
+            d = 0.0f;
+            return;
+        }
+        inv_n_sq = 1.0f / n_sq;
+        normal = n_raw * std::sqrt(inv_n_sq);
         d = normal.dot(p);
     }
 
@@ -156,6 +172,9 @@ struct quad {
     }
 
     inline bool hit(const ray& r, float t_min, float t_max, hit_record& rec) const {
+        // 拒绝退化四边形
+        if (inv_n_sq <= 0.0f) return false;
+
         float denom = normal.dot(r.direction);
         if (std::abs(denom) < 1e-6f) return false;
 
@@ -165,10 +184,11 @@ struct quad {
         Point hp = r.origin + t * r.direction;
         vec3 w = hp - p;
 
-        float up = w.dot(u);
-        float vp = w.dot(v);
-        if (up < 0.0f || up > u_len_sq) return false;
-        if (vp < 0.0f || vp > v_len_sq) return false;
+        float alpha = w.cross(v).dot(n_raw) * inv_n_sq;
+        float beta = u.cross(w).dot(n_raw) * inv_n_sq;
+
+        if (alpha < 0.0f || alpha > 1.0f) return false;
+        if (beta < 0.0f || beta  > 1.0f) return false;
 
         rec.p = hp;
         rec.set_face_normal(r, normal);

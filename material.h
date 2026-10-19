@@ -54,7 +54,8 @@ struct material {
             int i = wavelengthToChannelIndex(lambda);
             return spectral_emission[i];
         }
-        return rgbToSpectralAtWavelength(emission, lambda);
+        // 避免kB矩阵造成负光
+        return std::max(0.0f, rgbToSpectralAtWavelength(emission, lambda));
     }
 
 	// 介质在指定波长下的折射率(柯西色散方程)
