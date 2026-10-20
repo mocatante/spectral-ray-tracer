@@ -1,6 +1,6 @@
 # spectral-ray-tracer
-A minimalist C++ spectral path tracer based on RTIOW, featuring Cauchy dispersion and CUDA-ready structs.
-基于 RTIOW 改造的极简 C++ 光谱路径追踪器，包含柯西色散与面向CUDA的struct设计。
+A minimalist C++ spectral path tracer based on RTIOW, featuring BVH, Cauchy dispersion ,Direct Light Sampling and CUDA-ready structs.
+基于 RTIOW 改造的极简 C++ 光谱路径追踪器，包含BVH, 柯西色散, 直接光采样与面向CUDA的struct设计。
 ## preview/预览
 <img width="1260" height="709" alt="preview2" src="https://github.com/user-attachments/assets/763a6817-6614-4723-9095-3a94720bdec5" />
 <img width="1260" height="709" alt="preview1" src="https://github.com/user-attachments/assets/3cf967f3-9939-4b4d-9591-3e34022cc87d" />
@@ -12,8 +12,14 @@ A minimalist C++ spectral path tracer based on RTIOW, featuring Cauchy dispersio
 ## Features/特性
 - **Spectral Rendering**:95 channels (360nm–830nm).
   光谱渲染：95 个通道( 360nm–830nm )
+- **BVH**:with a simple BVH built.
+  实现简单的BVH遍历
 - **Cauchy Dispersion**: Accurate glass refraction.
   利用柯西色散实现色散效果
+- **Mixture Importance Sampling (MIS)**：Combines material BSDF sampling and direct target sampling with a 50/50 mixture probability.
+  混合重要性采样：以 50% 概率混合直接光采样与材质散射，降低噪声
+- **TLAS/BLAS Architecture**: Strictly separates scene assets from instances. Transform-free primitives bypass the instance wrapper for optimal memory and traversal performance.
+  资产/实例分离架构：场景资产与实例严格分离，无变换的图元跳过 Instance 包装，优化内存与遍历性能。
 - **CUDA Ready**: All primitives and materials use `struct`.
   面向 CUDA, 使用struct设计, 方便未来迁移至 GPU
 
@@ -27,13 +33,9 @@ Requires C++17 and OpenMP.Or you can just delete the line at camera.h
 
 ## Design Choice/设计选择
 
-### No Complex Optimizations/未做复杂优化
-Diffuse surfaces use simple uniform hemisphere sampling instead of cosine-weighted importance sampling. 
-No Russian Roulette.
-To keep the codebase logically simple and straightforward, which makes it much easier to port to CUDA in the future. 
-Performance is not the primary goal here.
-为了保持代码逻辑简单直观, 方便以后直接迁移到 CUDA
-这个项目的重点在于验证光谱渲染的可行性, 性能不是第一位
+### 关于优化
+Only simle BVH and Direct Light Sampling, for a basic accelerate. Considering that more efficient ready-made library will be used when migrating to CUDA in the future.
+仅简单实现类BVH和直接光采样, 考虑到未来迁移CUDA时将使用现成的更高效的库.
 
 ### The kB Matrix/关于 kB 矩阵
 Converting 3 RGB values to a 95-channel spectrum is a highly underdetermined problem.
