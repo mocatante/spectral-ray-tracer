@@ -32,14 +32,7 @@ inline void render_obj() {
     std::clog << "OBJ Loaded! Max Extent: " << max_extent << "\n";
 
 
-    instance obj_inst;
-    obj_inst.mesh_index = world.add_mesh(obj);
-
-    obj_inst.transform = mat4::rotate_y(0.0f);
-    obj_inst.inv_transform = obj_inst.transform.inverse();
-    obj_inst.normal_matrix = obj_inst.inv_transform.transpose();
-
-    world.add_instance(obj_inst);
+    world.add(obj, mat4::rotate_y(0.0f));
 
     float ground_y = bbox.min.y() - max_extent * 0.02f;
     float scene_size = max_extent * 20.0f;

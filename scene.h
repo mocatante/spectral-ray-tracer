@@ -145,37 +145,23 @@ struct mesh {
     }
 };
 
-struct instance {
-    int mesh_index;
-    mat4 transform;
-    mat4 inv_transform;
-    mat4 normal_matrix;
-
-    bool hit(const ray& r, float t_min, float t_max, hit_record& rec, const std::vector<mesh>& prototypes) const {
-		// 变换光线到局部空间
-        vec3 local_o = inv_transform.transform_point(r.origin);
-        vec3 local_d = inv_transform.transform_vector(r.direction);
-        ray local_ray(local_o, local_d);
-
-        hit_record temp_rec;
-        if (prototypes[mesh_index].hit(local_ray, t_min, t_max, temp_rec)) {
-			// 命中信息变换回世界空间
-            rec = temp_rec;
-            rec.p = transform.transform_point(temp_rec.p);
-            rec.normal = normal_matrix.transform_vector(temp_rec.normal).normalize();
-            return true;
-        }
-        return false;
-    }
-};
-
-
 enum PrimType : int {
     PRIM_SPHERE = 0,
     PRIM_QUAD = 1,
     PRIM_TRIANGLE = 2,
-    PRIM_INSTANCE = 3
+    PRIM_MESH = 3,
+    PRIM_INSTANCE = 4
 };
+
+// 仅提供变换包装, 无hit
+struct instance {
+    int prim_type;
+    int prim_index;
+    mat4 transform;
+    mat4 inv_transform;
+    mat4 normal_matrix;
+};
+
 
 // 用于辅助建立BVH
 struct scene_prim_ref {
@@ -194,31 +180,226 @@ struct scene_bvh_node {
     bool is_leaf() const { return left_idx == LEAF_NODE; }
 };
 
-
+// 资产引用
+// 用于场景构建时返回
+// 告诉外部scene添加了什么
+// 以复用资产
+struct AssetRef {
+    int type;
+    int index;
+};
 
 struct scene {
+    // 纯资产池assets
     std::vector<sphere> spheres;
     std::vector<quad> quads;
     std::vector<triangle> triangles;
-    std::vector<mesh> prototypes;
+    std::vector<mesh> meshes;
+
+    // 带变换实例池
     std::vector<instance> instances;
+
+    // 场景渲染列表
+    // 包括带变换instance和基础图元(不带变换实例)
+    std::vector<AssetRef> objects;
 
     std::vector<scene_bvh_node> nodes;
     bool is_bvh_built = false;
 
-    void add(const sphere& s) { spheres.push_back(s); is_bvh_built = false; }
-    void add(const quad& q) { quads.push_back(q); is_bvh_built = false; }
-    void add(const triangle& t) { triangles.push_back(t); is_bvh_built = false; }
-    // 注意返回索引
-    // 在scene中, mesh仅作为资产
-    // instance需要明确指向一个mesh
-    // 对应关系需要在scene外部维护
-    int add_mesh(const mesh& m) {
-        int idx = (int)prototypes.size();
-        prototypes.push_back(m);
-        return idx;
+    // 添加资产, 不会被渲染
+    AssetRef add_asset(const sphere& s) {
+        int idx = (int)spheres.size();
+        spheres.push_back(s);
+        return { PRIM_SPHERE, idx };
     }
-    void add_instance(const instance& inst) {instances.push_back(inst);is_bvh_built = false;}
+    AssetRef add_asset(const quad& q) {
+        int idx = (int)quads.size();
+        quads.push_back(q);
+        return { PRIM_QUAD, idx };
+    }
+    AssetRef add_asset(const triangle& t) {
+        int idx = (int)triangles.size();
+        triangles.push_back(t);
+        return { PRIM_TRIANGLE, idx };
+    }
+    AssetRef add_asset(const mesh& m) {
+        int idx = (int)meshes.size();
+        meshes.push_back(m);
+        return { PRIM_MESH, idx };
+    }
+
+    // 直接添加图元, 升级为不带变换实例, 会被渲染
+    void add(const sphere& s) { add(add_asset(s)); }
+    void add(const quad& q) { add(add_asset(q)); }
+    void add(const triangle& t) { add(add_asset(t)); }
+    void add(const mesh& m) { add(add_asset(m)); }
+    void add(const AssetRef& ref) {
+        objects.push_back(ref);
+        is_bvh_built = false;
+    }
+
+    // 带变换添加图元, 内部自动包装 Instance, 会被渲染
+    void add(const sphere& s, const mat4& transform) { add(add_asset(s), transform); }
+    void add(const quad& q, const mat4& transform) { add(add_asset(q), transform); }
+    void add(const triangle& t, const mat4& transform) { add(add_asset(t), transform); }
+    void add(const mesh& m, const mat4& transform) { add(add_asset(m), transform); }
+
+    // 用已有资产加变换添加, 包装成 Instance, 会被渲染
+    void add(const AssetRef& ref, const mat4& transform) {
+        int inst_idx = add_instance_impl(ref.type, ref.index, transform);
+        objects.push_back({ PRIM_INSTANCE, inst_idx });
+    }
+
+
+    void build_BVH() {
+        nodes.clear();
+        if (objects.empty()) {
+            is_bvh_built = true;
+            return;
+        }
+
+        std::vector<scene_prim_ref> prims;
+        for (int i = 0; i < (int)objects.size(); ++i) {
+            int type = objects[i].type;
+            int index = objects[i].index;
+            aabb local_bounds;
+            bool valid = true;
+
+            if (type == PRIM_INSTANCE) {
+                const auto& inst = instances[index];
+                switch (inst.prim_type) {
+                case PRIM_SPHERE:   local_bounds = spheres[inst.prim_index].get_aabb(); break;
+                case PRIM_QUAD:     local_bounds = quads[inst.prim_index].get_aabb(); break;
+                case PRIM_TRIANGLE: local_bounds = triangles[inst.prim_index].get_aabb(); break;
+                case PRIM_MESH: {
+                    const mesh& m = meshes[inst.prim_index];
+                    if (!m.is_bvh_built) valid = false;
+                    local_bounds = m.get_aabb();
+                    break;
+                }
+                default: valid = false;
+                }
+
+                if (valid) {
+                    aabb world_bounds;
+                    for (int k = 0; k < 8; ++k) {
+                        vec3 pt(k & 1 ? local_bounds.max.x() : local_bounds.min.x(),
+                            k & 2 ? local_bounds.max.y() : local_bounds.min.y(),
+                            k & 4 ? local_bounds.max.z() : local_bounds.min.z());
+                        world_bounds.expand(inst.transform.transform_point(pt));
+                    }
+                    prims.push_back({ world_bounds, PRIM_INSTANCE, index });
+                }
+            }
+            else {
+                // 直接图元
+                switch (type) {
+                case PRIM_SPHERE:   local_bounds = spheres[index].get_aabb(); break;
+                case PRIM_QUAD:     local_bounds = quads[index].get_aabb(); break;
+                case PRIM_TRIANGLE: local_bounds = triangles[index].get_aabb(); break;
+                case PRIM_MESH: {
+                    const mesh& m = meshes[index];
+                    if (!m.is_bvh_built) valid = false;
+                    local_bounds = m.get_aabb();
+                    break;
+                }
+                default: valid = false;
+                }
+                if (valid) prims.push_back({ local_bounds, type, index });
+            }
+        }
+
+        if (prims.empty()) {
+            is_bvh_built = true;
+            return;
+        }
+
+        // 预分配节点空间
+        nodes.reserve(prims.size() * 2 - 1);
+
+        // 递归建树
+        build_recursive(prims, 0, (int)prims.size());
+
+        is_bvh_built = true;
+    }
+
+    bool hit_primitive(int type, int index, const ray& r, float t_min, float t_max, hit_record& rec) const {
+        switch (type) {
+        case PRIM_SPHERE:   return spheres[index].hit(r, t_min, t_max, rec);
+        case PRIM_QUAD:     return quads[index].hit(r, t_min, t_max, rec);
+        case PRIM_TRIANGLE: return triangles[index].hit(r, t_min, t_max, rec);
+        case PRIM_MESH:     return meshes[index].hit(r, t_min, t_max, rec);
+
+        case PRIM_INSTANCE: {
+            // 变换光线到局部空间求交
+            const instance& inst = instances[index];
+            vec3 local_o = inst.inv_transform.transform_point(r.origin);
+            vec3 local_d = inst.inv_transform.transform_vector(r.direction);
+            ray local_ray(local_o, local_d);
+            hit_record local_rec;
+            if (hit_primitive(inst.prim_type, inst.prim_index, local_ray, t_min, t_max, local_rec)) {
+                // 信息变换到世界空间
+                rec = local_rec;
+                rec.p = inst.transform.transform_point(local_rec.p);
+                rec.normal = inst.normal_matrix.transform_vector(local_rec.normal).normalize();
+                return true;
+            }
+            return false;
+        }
+        default: return false;
+        }
+    }
+
+    bool hit(const ray& r, float t_min, float t_max, hit_record& rec) const {
+        if (!is_bvh_built || nodes.empty()) {
+            return false;   //不做暴力渲染
+        }
+
+        bool hit_anything = false;
+        float closest_so_far = t_max;
+
+        int stack[64];
+        int stack_ptr = 0;
+        stack[stack_ptr++] = 0;
+
+        while (stack_ptr > 0) {
+            int node_idx = stack[--stack_ptr];
+            const scene_bvh_node& node = nodes[node_idx];
+
+            if (!node.bounds.hit(r, t_min, closest_so_far)) continue;
+
+            if (node.is_leaf()) {
+                hit_record temp_rec;
+                if (hit_primitive(node.prim_type, node.prim_index, r, t_min, closest_so_far, temp_rec)) {
+                    hit_anything = true;
+                    closest_so_far = temp_rec.t;
+                    rec = temp_rec;
+                }
+            }
+            else {
+                stack[stack_ptr++] = node.left_idx;
+                stack[stack_ptr++] = node.right_idx;
+            }
+        }
+        return hit_anything;
+    }
+
+private:
+    // 辅助将变换包装成 Instance
+    int add_instance_impl(int type, int index, const mat4& transform) {
+        instance inst;
+        inst.prim_type = type;
+        inst.prim_index = index;
+        inst.transform = transform;
+        inst.inv_transform = transform.inverse();
+        inst.normal_matrix = inst.inv_transform.transpose();
+
+        instances.push_back(inst);
+        is_bvh_built = false;
+
+        return (int)instances.size() - 1;
+    }
+
 
     int build_recursive(std::vector<scene_prim_ref>& prims, int start, int end) {
         int node_idx = (int)nodes.size();
@@ -257,115 +438,5 @@ struct scene {
         nodes[node_idx].left_idx = left_child;
         nodes[node_idx].right_idx = right_child;
         return node_idx;
-    }
-
-
-    void build_BVH() {
-        nodes.clear();
-        if (spheres.empty() && quads.empty() && triangles.empty() && instances.empty()) {
-            is_bvh_built = true;
-            return;
-        }
-
-        std::vector<scene_prim_ref> prims;
-        for (int i = 0; i < (int)spheres.size(); ++i) {
-            aabb b = spheres[i].get_aabb();
-            prims.push_back({ b, PRIM_SPHERE, i });
-        }
-        for (int i = 0; i < (int)quads.size(); ++i) {
-            aabb b = quads[i].get_aabb();
-            prims.push_back({ b,PRIM_QUAD, i });
-        }
-        for (int i = 0; i < (int)triangles.size(); ++i) {
-            aabb b = triangles[i].get_aabb();
-            prims.push_back({ b,PRIM_TRIANGLE, i });
-        }
-        for (int i = 0; i < (int)instances.size(); ++i) {
-            
-            const mesh& proto = prototypes[instances[i].mesh_index];
-            // 避免未构建BVH的mesh
-            if (!proto.is_bvh_built)continue;
-            // 实例的包围盒需要变换
-            aabb local_bounds = proto.get_aabb();
-            
-            aabb world_bounds;
-            // 重新求包围盒
-            for (int k = 0; k < 8; ++k) {
-                vec3 pt(k & 1 ? local_bounds.max.x() : local_bounds.min.x(),
-                    k & 2 ? local_bounds.max.y() : local_bounds.min.y(),
-                    k & 4 ? local_bounds.max.z() : local_bounds.min.z());
-                world_bounds.expand(instances[i].transform.transform_point(pt));
-            }
-            prims.push_back({ world_bounds,PRIM_INSTANCE, i });
-        }
-
-        if (prims.empty()) {
-            is_bvh_built = true;
-            return;
-        }
-
-        // 预分配节点空间
-        nodes.reserve(prims.size() * 2 - 1);
-
-        // 递归建树
-        build_recursive(prims, 0, (int)prims.size());
-
-        is_bvh_built = true;
-    }
-
-	// 暂时不做加速结构
-    bool hit(const ray& r, float t_min, float t_max, hit_record& rec) const {
-        if (!is_bvh_built || nodes.empty()) {
-            return false;   //不做暴力渲染
-        }
-
-        bool hit_anything = false;
-        float closest_so_far = t_max;
-
-        int stack[64];
-        int stack_ptr = 0;
-        stack[stack_ptr++] = 0;
-
-        while (stack_ptr > 0) {
-            int node_idx = stack[--stack_ptr];
-            const scene_bvh_node& node = nodes[node_idx];
-
-            if (!node.bounds.hit(r, t_min, closest_so_far)) continue;
-
-            if (node.is_leaf()) {
-                hit_record temp_rec;
-                bool hit_this = false;
-
-                switch (node.prim_type) {
-                    case PRIM_SPHERE: {
-                        hit_this = spheres[node.prim_index].hit(r, t_min, closest_so_far, temp_rec);
-                        break;
-                    }
-                    case PRIM_QUAD: {
-                        hit_this = quads[node.prim_index].hit(r, t_min, closest_so_far, temp_rec);
-                        break;
-                    }
-                    case PRIM_TRIANGLE: {
-                        hit_this = triangles[node.prim_index].hit(r, t_min, closest_so_far, temp_rec);
-                        break;
-                    }
-                    case PRIM_INSTANCE: {
-                        hit_this = instances[node.prim_index].hit(r, t_min, closest_so_far, temp_rec, prototypes);
-                        break;
-                    }
-                }
-
-                if (hit_this) {
-                    hit_anything = true;
-                    closest_so_far = temp_rec.t;
-                    rec = temp_rec;
-                }
-            }
-            else {
-                stack[stack_ptr++] = node.left_idx;
-                stack[stack_ptr++] = node.right_idx;
-            }
-        }
-        return hit_anything;
     }
 };

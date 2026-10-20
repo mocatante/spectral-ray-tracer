@@ -23,7 +23,7 @@ inline mesh make_box_mesh(const Point& a, const Point& b, const material& mat) {
     return m;
 }
 
-inline void render_cornell() {
+inline void render_cornell_box() {
     scene world;
 
     material red_mat = material::Diffuse(Color(0.65f, 0.05f, 0.05f));
@@ -47,23 +47,8 @@ inline void render_cornell() {
     box2.build_BVH();
 
 
-    instance inst1;
-    inst1.mesh_index = world.add_mesh(box1);
-    mat4 r1 = mat4::rotate_y(-15);
-    mat4 t1 = mat4::translate(265, 0, 295);
-    inst1.transform = t1 * r1;
-    inst1.inv_transform = mat4::rotate_y(15) * mat4::translate(-265, 0, -295);
-    inst1.normal_matrix = inst1.transform;
-    world.add_instance(inst1);
-
-    instance inst2;
-    inst2.mesh_index = world.add_mesh(box2);
-    mat4 r2 = mat4::rotate_y(18);
-    mat4 t2 = mat4::translate(130, 0, 65);
-    inst2.transform = t2 * r2;
-    inst2.inv_transform = mat4::rotate_y(-18) * mat4::translate(-130, 0, -65);
-    inst2.normal_matrix = inst2.transform;
-    world.add_instance(inst2);
+    world.add(box1, mat4::translate(265, 0, 295) * mat4::rotate_y(15));
+    world.add(box2, mat4::translate(130, 0, 65) * mat4::rotate_y(-18));
 
     world.build_BVH();
 
