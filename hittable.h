@@ -69,6 +69,11 @@ struct aabb {
             (min.y() + max.y()) * 0.5f,
             (min.z() + max.z()) * 0.5f);
     }
+
+    // 获取aabb的外接球半径, 用于粗略对物体采样
+    float get_sphere_radius() const {
+        return (max - min).length() * 0.5f;
+    }
 };
 
 
@@ -119,6 +124,45 @@ struct sphere {
         rec.t = t;
         rec.mat = &mat;
         return true;
+    }
+
+    // sphere的直接采样
+    bool sample(const Point& origin, Direction& out_dir) const {
+        vec3 to_center = center - origin;
+        float dist2 = to_center.dot(to_center);
+
+        if (dist2 <= radius * radius + 1e-6f) return false;
+
+        vec3 w = to_center.normalize();
+        vec3 u, v;
+        build_onb(w, u, v);
+
+        float cos_theta_max = std::sqrt(std::max(0.0f, 1.0f - (radius * radius) / dist2));
+
+        float cos_theta = 1.0f - random_float() * (1.0f - cos_theta_max);
+        float sin_theta = std::sqrt(std::max(0.0f, 1.0f - cos_theta * cos_theta));
+        float phi = 2.0f * PI_F * random_float();
+
+        vec3 local_dir(sin_theta * std::cos(phi), sin_theta * std::sin(phi), cos_theta);
+        out_dir = (u * local_dir.x() + v * local_dir.y() + w * local_dir.z()).normalize();
+        return true;
+    }
+    // sphere的直接采样pdf
+    float pdf(const Point& origin, const Direction& dir) const {
+        vec3 to_center = center - origin;
+        float dist2 = to_center.dot(to_center);
+
+        if (dist2 <= radius * radius + 1e-6f) return 0.0f;
+
+        float cos_theta_max = std::sqrt(std::max(0.0f, 1.0f - (radius * radius) / dist2));
+        float solid_angle = 2.0f * PI_F * (1.0f - cos_theta_max);
+
+        float cos_angle = to_center.normalize().dot(dir);
+
+        if (cos_angle > cos_theta_max - 1e-4f) {
+            return 1.0f / solid_angle;
+        }
+        return 0.0f;
     }
 };
 
@@ -195,6 +239,41 @@ struct quad {
         rec.t = t;
         rec.mat = &mat;
         return true;
+    }
+
+    // quad的直接采样
+    bool sample(const Point& origin, Direction& out_dir) const {
+        if (inv_n_sq <= 0.0f) return false;
+
+        float r1 = random_float();
+        float r2 = random_float();
+
+        Point p_on_light = p + u * r1 + v * r2;
+        out_dir = (p_on_light - origin).normalize();
+        return true;
+    }
+
+    // quad的直接采样pdf
+    float pdf(const Point& origin, const Direction& dir) const {
+        if (inv_n_sq <= 0.0f) return 0.0f;
+
+        float denom = normal.dot(dir);
+        if (std::abs(denom) < 1e-6f) return 0.0f;
+
+        float t_hit = (d - normal.dot(origin)) / denom;
+        if (t_hit <= 1e-4f) return 0.0f;
+
+        Point hp = origin + dir * t_hit;
+        vec3 w = hp - p;
+        float alpha = w.cross(v).dot(n_raw) * inv_n_sq;
+        float beta = u.cross(w).dot(n_raw) * inv_n_sq;
+        if (alpha < 0.0f || alpha > 1.0f || beta < 0.0f || beta > 1.0f) return 0.0f;
+
+        float area = std::sqrt(1.0f / inv_n_sq);
+        float dist2 = t_hit * t_hit;
+        float cos_light = std::abs(normal.dot(dir));
+        if (cos_light < 1e-6f) return 0.0f;
+        return (dist2 / cos_light) / area;
     }
 };
 

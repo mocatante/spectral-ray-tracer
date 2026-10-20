@@ -86,6 +86,24 @@ inline Direction uniform_hemisphere(const vec3& n) {
     return (t * x + b * y + nn * z).normalize();
 }
 
+// 余弦加权半球采样，PDF = cos(theta) / PI
+inline Direction cosine_sample_hemisphere(const vec3 & n) {
+    float u1 = random_float();
+    float u2 = random_float();
+
+    float r = std::sqrt(u1);
+    float phi = 2.0f * PI_F * u2;
+
+    float x = r * std::cos(phi);
+    float y = r * std::sin(phi);
+    float z = std::sqrt(std::max(0.0f, 1.0f - u1));
+
+    vec3 nn = n.normalize();
+    vec3 t, b;
+    build_onb(nn, t, b);
+    return (t * x + b * y + nn * z).normalize();
+}
+
 // 根据温度生成黑体辐射光谱
 inline std::vector<float> make_blackbody_spectrum(float temp_K) {
     std::vector<float> spec(SpectralColor::kChannelCount);

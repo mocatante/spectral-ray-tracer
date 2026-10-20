@@ -172,20 +172,29 @@ struct camera {
 
         // 材质使用pdf采样
         if (mat.use_pdf) {
+            // 用0.5混合直接采样
+            bool use_target = world->has_targets() && (random_float() < 0.5f);
             // 抽取方向
-            Direction new_dir = mat.sample_scatter(rec.normal);
+            Direction new_dir;
 
-            // 该采样方向的概率密度
-            float pdf = mat.pdf_scatter(rec.normal, new_dir);
-            if (pdf <= 1e-8f) return 0.0f;
+            if (use_target) {
+                world->sample_direct_target(rec.p, new_dir);   //直接采样
+            }
+            else {
+                new_dir = mat.sample_scatter(rec.normal);// 材质采样
+            }
 
-            // 该方向贡献权重
-            float geo_term = mat.eval_geometry_term(rec.normal, new_dir);
-            // 材质吸收率
-            float albedo = mat.albedoAt(lambda);
+            // 混合pdf
+            float p_mat = mat.pdf_scatter(rec.normal, new_dir);
+            float p_target = world->has_targets() ? world->pdf_direct_target(rec.p, new_dir) : 0.0f;
+            float p_mix = world->has_targets() ? 0.5f * (p_mat + p_target) : p_mat;
+            if (p_mix <= 1e-8f) return 0.0f;
 
             // 蒙特卡洛估计
-            float newThroughput = throughput * albedo * (geo_term / pdf);
+            // 此处要求材质对不合理的直接采样的入射光线贡献权重置为0
+            float geo_term = mat.eval_geometry_term(rec.normal, new_dir);
+            float albedo = mat.albedoAt(lambda);
+            float newThroughput = throughput * albedo * (geo_term / p_mix);
             if (newThroughput <= 0.0f) return 0.0f;
 
             // 递归追踪

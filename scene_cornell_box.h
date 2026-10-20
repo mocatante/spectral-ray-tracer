@@ -38,8 +38,14 @@ inline void render_cornell_box() {
     world.add(quad(Point(0, 555, 0), vec3(555, 0, 0), vec3(0, 0, 555), white_mat));
     world.add(quad(Point(0, 0, 555), vec3(555, 0, 0), vec3(0, 0, -555), white_mat));
     world.add(quad(Point(555, 0, 555), vec3(-555, 0, 0), vec3(0, 555, 0), white_mat));
-    world.add(quad(Point(213, 554, 227), vec3(130, 0, 0), vec3(0, 0, 105), light_mat));
-
+    // 光源
+    world.add(quad(Point(213, 554, 227), vec3(130, 0, 0), vec3(0, 0, 105), light_mat), IS_DIRECT_SAMPLE);
+    
+    // 理论上
+    // 转成Instance 使用aabb, 噪点比无pdf少, 比精确对quad采样多
+    // 但是实际受具体实现影响
+    //world.add(quad(Point(213, 554, 227), vec3(130, 0, 0), vec3(0, 0, 105), light_mat),mat4::translate(0, 0, 0),IS_DIRECT_SAMPLE);
+    
     mesh box1 = make_box_mesh(Point(0, 0, 0), Point(165, 330, 165), white_mat);
     mesh box2 = make_box_mesh(Point(0, 0, 0), Point(165, 165, 165), white_mat);
 

@@ -189,8 +189,30 @@ struct AssetRef {
     int index;
 };
 
+// 辅助对物体直接采样
+enum DirectSampleFlag : int {
+    NOT_DIRECT_SAMPLE = 0,
+    IS_DIRECT_SAMPLE = 1
+};
+
+struct DirectTargetRef {
+    AssetRef ref;
+    float weight;
+    Point bound_center; // 外接球，用于复杂形体粗采样
+    float bound_radius;
+};
+
+
+// 场景设计为 资产和实例分离
+// 纯资产池Asset: 不参与渲染
+// 变换实例池Instances: 显式带变换实例
+// 场景渲染列表Objects: 会被建入 BVH 并被渲染的基础图元和Instance(统一包装成AssetRef)
+//
+// 对于不带变换的图元，不会为其显式创建 Instance 包装。
+// 它们直接作为 AssetRef 进入 objects 列表
+// 从逻辑上讲，视为"隐藏单位矩阵的特殊实例"
 struct scene {
-    // 纯资产池assets
+    // 纯资产池Assets
     std::vector<sphere> spheres;
     std::vector<quad> quads;
     std::vector<triangle> triangles;
@@ -203,8 +225,15 @@ struct scene {
     // 包括带变换instance和基础图元(不带变换实例)
     std::vector<AssetRef> objects;
 
+    // 直接采样相关
+    std::vector<DirectTargetRef> direct_targets;
+    float total_target_weight = 0.0f;
+
     std::vector<scene_bvh_node> nodes;
     bool is_bvh_built = false;
+
+
+    bool has_targets() const { return !direct_targets.empty(); }
 
     // 添加资产, 不会被渲染
     AssetRef add_asset(const sphere& s) {
@@ -229,25 +258,45 @@ struct scene {
     }
 
     // 直接添加图元, 升级为不带变换实例, 会被渲染
-    void add(const sphere& s) { add(add_asset(s)); }
-    void add(const quad& q) { add(add_asset(q)); }
-    void add(const triangle& t) { add(add_asset(t)); }
-    void add(const mesh& m) { add(add_asset(m)); }
-    void add(const AssetRef& ref) {
-        objects.push_back(ref);
-        is_bvh_built = false;
-    }
+    void add(const sphere& s, DirectSampleFlag flag = NOT_DIRECT_SAMPLE, float weight = 1.0f) { add_impl(add_asset(s), flag, weight); }
+    void add(const quad& q, DirectSampleFlag flag = NOT_DIRECT_SAMPLE, float weight = 1.0f) { add_impl(add_asset(q), flag, weight); }
+    void add(const triangle& t, DirectSampleFlag flag = NOT_DIRECT_SAMPLE, float weight = 1.0f) { add_impl(add_asset(t), flag, weight); }
+    void add(const mesh& m, DirectSampleFlag flag = NOT_DIRECT_SAMPLE, float weight = 1.0f) { add_impl(add_asset(m), flag, weight); }
+    void add(const AssetRef& ref, DirectSampleFlag flag = NOT_DIRECT_SAMPLE, float weight = 1.0f) { add_impl(ref, flag, weight); }
 
     // 带变换添加图元, 内部自动包装 Instance, 会被渲染
-    void add(const sphere& s, const mat4& transform) { add(add_asset(s), transform); }
-    void add(const quad& q, const mat4& transform) { add(add_asset(q), transform); }
-    void add(const triangle& t, const mat4& transform) { add(add_asset(t), transform); }
-    void add(const mesh& m, const mat4& transform) { add(add_asset(m), transform); }
-
+    void add(const sphere& s, const mat4& transform, DirectSampleFlag flag = NOT_DIRECT_SAMPLE, float weight = 1.0f) { add_impl(add_asset(s), transform, flag, weight); }
+    void add(const quad& q, const mat4& transform, DirectSampleFlag flag = NOT_DIRECT_SAMPLE, float weight = 1.0f) { add_impl(add_asset(q), transform, flag, weight); }
+    void add(const triangle& t, const mat4& transform, DirectSampleFlag flag = NOT_DIRECT_SAMPLE, float weight = 1.0f) { add_impl(add_asset(t), transform, flag, weight); }
+    void add(const mesh& m, const mat4& transform, DirectSampleFlag flag = NOT_DIRECT_SAMPLE, float weight = 1.0f) { add_impl(add_asset(m), transform, flag, weight); }
     // 用已有资产加变换添加, 包装成 Instance, 会被渲染
-    void add(const AssetRef& ref, const mat4& transform) {
-        int inst_idx = add_instance_impl(ref.type, ref.index, transform);
-        objects.push_back({ PRIM_INSTANCE, inst_idx });
+    void add(const AssetRef& ref, const mat4& transform, DirectSampleFlag flag = NOT_DIRECT_SAMPLE, float weight = 1.0f) { add_impl(ref, transform, flag, weight); }
+
+    // 直接采样方向
+    bool sample_direct_target(const Point& origin, Direction& out_dir) const {
+        if (direct_targets.empty() || total_target_weight <= 0.0f) return false;
+
+        // 加权随机选一个
+        float r = random_float() * total_target_weight;
+        int picked = -1;
+        for (int i = 0; i < (int)direct_targets.size(); ++i) {
+            r -= direct_targets[i].weight;
+            if (r <= 0.0f) { picked = i; break; }
+        }
+        if (picked == -1) picked = (int)direct_targets.size() - 1;
+
+        return sample_primitive(direct_targets[picked], origin, out_dir);
+    }
+    // 直接采样对应pdf
+    float pdf_direct_target(const Point& origin, const Direction& dir) const {
+        if (direct_targets.empty() || total_target_weight <= 0.0f) return 0.0f;
+
+        float total_pdf = 0.0f;
+        for (const auto& t : direct_targets) {
+            float p = pdf_primitive(t, origin, dir);
+            total_pdf += (t.weight / total_target_weight) * p;
+        }
+        return total_pdf;
     }
 
 
@@ -260,55 +309,10 @@ struct scene {
 
         std::vector<scene_prim_ref> prims;
         for (int i = 0; i < (int)objects.size(); ++i) {
-            int type = objects[i].type;
-            int index = objects[i].index;
-            aabb local_bounds;
-            bool valid = true;
-
-            if (type == PRIM_INSTANCE) {
-                const auto& inst = instances[index];
-                switch (inst.prim_type) {
-                case PRIM_SPHERE:   local_bounds = spheres[inst.prim_index].get_aabb(); break;
-                case PRIM_QUAD:     local_bounds = quads[inst.prim_index].get_aabb(); break;
-                case PRIM_TRIANGLE: local_bounds = triangles[inst.prim_index].get_aabb(); break;
-                case PRIM_MESH: {
-                    const mesh& m = meshes[inst.prim_index];
-                    if (!m.is_bvh_built) valid = false;
-                    local_bounds = m.get_aabb();
-                    break;
-                }
-                default: valid = false;
-                }
-
-                if (valid) {
-                    aabb world_bounds;
-                    for (int k = 0; k < 8; ++k) {
-                        vec3 pt(k & 1 ? local_bounds.max.x() : local_bounds.min.x(),
-                            k & 2 ? local_bounds.max.y() : local_bounds.min.y(),
-                            k & 4 ? local_bounds.max.z() : local_bounds.min.z());
-                        world_bounds.expand(inst.transform.transform_point(pt));
-                    }
-                    prims.push_back({ world_bounds, PRIM_INSTANCE, index });
-                }
-            }
-            else {
-                // 直接图元
-                switch (type) {
-                case PRIM_SPHERE:   local_bounds = spheres[index].get_aabb(); break;
-                case PRIM_QUAD:     local_bounds = quads[index].get_aabb(); break;
-                case PRIM_TRIANGLE: local_bounds = triangles[index].get_aabb(); break;
-                case PRIM_MESH: {
-                    const mesh& m = meshes[index];
-                    if (!m.is_bvh_built) valid = false;
-                    local_bounds = m.get_aabb();
-                    break;
-                }
-                default: valid = false;
-                }
-                if (valid) prims.push_back({ local_bounds, type, index });
-            }
+            aabb bounds = get_primitive_aabb(objects[i]);
+            if (bounds.min.x() > bounds.max.x()) continue;
+            prims.push_back({ bounds, objects[i].type, objects[i].index });
         }
-
         if (prims.empty()) {
             is_bvh_built = true;
             return;
@@ -396,8 +400,128 @@ private:
 
         instances.push_back(inst);
         is_bvh_built = false;
-
         return (int)instances.size() - 1;
+    }
+
+    // 注册target
+    void register_target(const AssetRef& ref, float weight) {
+        aabb b = get_primitive_aabb(ref);
+        if (b.min.x() > b.max.x()) return;
+        direct_targets.push_back({ ref, weight, b.center(), b.get_sphere_radius() });
+        total_target_weight += weight;
+    }
+
+    void add_impl(const AssetRef& ref, DirectSampleFlag isTarget, float weight) {
+        objects.push_back(ref);
+        if (isTarget == IS_DIRECT_SAMPLE) register_target(ref, weight);
+        is_bvh_built = false;
+    }
+
+    void add_impl(const AssetRef& ref, const mat4& transform, DirectSampleFlag isTarget, float weight) {
+        int inst_idx = add_instance_impl(ref.type, ref.index, transform);
+        AssetRef inst_ref = { PRIM_INSTANCE, inst_idx };
+        objects.push_back(inst_ref);
+        if (isTarget == IS_DIRECT_SAMPLE) register_target(inst_ref, weight);
+    }
+
+    // 注册直接采样目标
+    void register_direct_target(const AssetRef& ref, float weight) {
+        aabb b = get_primitive_aabb(ref);
+        if (b.min.x() > b.max.x()) return;
+        direct_targets.push_back({ ref, weight, b.center(), b.get_sphere_radius() });
+        total_target_weight += weight;
+    }
+
+    // hittable的精确pdf采样
+    // 如果未实现, 则使用aabb外接球粗略采样
+    // 更新hittable的pdf后需要手动更新此处switch
+    bool sample_primitive(const DirectTargetRef& t, const Point& origin, Direction& out_dir) const {
+        switch (t.ref.type) {
+        case PRIM_SPHERE:   return spheres[t.ref.index].sample(origin, out_dir);
+        case PRIM_QUAD:     return quads[t.ref.index].sample(origin, out_dir);
+        // 当新增精确pdf时添加
+        default:
+            return sample_bounding_sphere(t, origin, out_dir);
+        }
+    }
+
+    // hittable报告的精确采样概率
+    // 未实现则使用aabb外接球
+    // 更新hittable的pdf后需要手动更新此处switch
+    float pdf_primitive(const DirectTargetRef& t, const Point& origin, const Direction& dir) const {
+        switch (t.ref.type) {
+        case PRIM_SPHERE:   return spheres[t.ref.index].pdf(origin, dir);
+        case PRIM_QUAD:     return quads[t.ref.index].pdf(origin, dir);
+        // 当新增精确pdf时添加
+        default:
+            return pdf_bounding_sphere(t, origin, dir);
+        }
+    }
+
+    // aabb外接球采样
+    bool sample_bounding_sphere(const DirectTargetRef& t, const Point& origin, Direction& out_dir) const {
+        vec3 to_center = t.bound_center - origin;
+        float dist2 = to_center.dot(to_center);
+        if (dist2 <= t.bound_radius * t.bound_radius) return false;
+
+        vec3 w = to_center.normalize();
+        vec3 u, v;
+        build_onb(w, u, v);
+
+        float cos_theta_max = std::sqrt(std::max(0.0f, 1.0f - (t.bound_radius * t.bound_radius) / dist2));
+        float cos_theta = 1.0f - random_float() * (1.0f - cos_theta_max);
+        float sin_theta = std::sqrt(std::max(0.0f, 1.0f - cos_theta * cos_theta));
+        float phi = 2.0f * PI_F * random_float();
+
+        vec3 local_dir(sin_theta * std::cos(phi), sin_theta * std::sin(phi), cos_theta);
+        out_dir = (u * local_dir.x() + v * local_dir.y() + w * local_dir.z()).normalize();
+        return true;
+    }
+
+    // aabb外接球采样概率
+    float pdf_bounding_sphere(const DirectTargetRef& t, const Point& origin, const Direction& dir) const {
+        vec3 to_center = t.bound_center - origin;
+        float dist2 = to_center.dot(to_center);
+        if (dist2 <= t.bound_radius * t.bound_radius) return 0.0f;
+
+        float cos_theta_max = std::sqrt(std::max(0.0f, 1.0f - (t.bound_radius * t.bound_radius) / dist2));
+        float solid_angle = 2.0f * PI_F * (1.0f - cos_theta_max);
+        float cos_angle = to_center.normalize().dot(dir);
+        if (cos_angle > cos_theta_max - 1e-4f) {
+            return 1.0f / solid_angle;
+        }
+        return 0.0f;
+    }
+
+
+    // 世界空间aabb
+    aabb get_primitive_aabb(const AssetRef& ref) const {
+        if (ref.type == PRIM_INSTANCE) {
+            const instance& inst = instances[ref.index];
+            aabb local_b = get_local_aabb(inst.prim_type, inst.prim_index);
+            if (local_b.min.x() > local_b.max.x()) return aabb();
+
+            aabb world_b;
+            for (int k = 0; k < 8; ++k) {
+                vec3 pt(k & 1 ? local_b.max.x() : local_b.min.x(),
+                    k & 2 ? local_b.max.y() : local_b.min.y(),
+                    k & 4 ? local_b.max.z() : local_b.min.z());
+                world_b.expand(inst.transform.transform_point(pt));
+            }
+            return world_b;
+        }
+
+        return get_local_aabb(ref.type, ref.index);
+    }
+
+    aabb get_local_aabb(int type, int index) const {
+        switch (type) {
+        case PRIM_SPHERE:   return spheres[index].get_aabb();
+        case PRIM_QUAD:     return quads[index].get_aabb();
+        case PRIM_TRIANGLE: return triangles[index].get_aabb();
+        case PRIM_MESH:     return meshes[index].get_aabb();
+        default: return aabb();
+        }
     }
 
 
