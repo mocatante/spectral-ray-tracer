@@ -170,17 +170,36 @@ struct camera {
             return throughput * mat.emissionAt(lambda);
         }
 
-        // 散射
+        // 材质使用pdf采样
+        if (mat.use_pdf) {
+            // 抽取方向
+            Direction new_dir = mat.sample_scatter(rec.normal);
+
+            // 该采样方向的概率密度
+            float pdf = mat.pdf_scatter(rec.normal, new_dir);
+            if (pdf <= 1e-8f) return 0.0f;
+
+            // 该方向贡献权重
+            float geo_term = mat.eval_geometry_term(rec.normal, new_dir);
+            // 材质吸收率
+            float albedo = mat.albedoAt(lambda);
+
+            // 蒙特卡洛估计
+            float newThroughput = throughput * albedo * (geo_term / pdf);
+            if (newThroughput <= 0.0f) return 0.0f;
+
+            // 递归追踪
+            Point newOrigin = rec.p + new_dir * 1e-3f;
+            return trace(world, ray(newOrigin, new_dir), lambda, newThroughput, depth + 1, max_depth);
+        }
+
+        // 不适用pdf采样的 Delta材质
         scatter_result sr = mat.scatter(r.direction, rec.p, rec.normal, rec.front_face, lambda);
         if (!sr.scattered) return 0.0f;
-
         float newThroughput = throughput * sr.weight;
         if (newThroughput <= 0.0f) return 0.0f;
-
         Point newOrigin = rec.p + sr.dir * 1e-3f;
-        ray next_ray(newOrigin, sr.dir);
-
-        return trace(world, next_ray, lambda, newThroughput, depth + 1, max_depth);
+        return trace(world, ray(newOrigin, sr.dir), lambda, newThroughput, depth + 1, max_depth);
     }
 
 
