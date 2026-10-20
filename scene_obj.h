@@ -63,7 +63,7 @@ inline void render_obj() {
         vec3(max_extent * 4.0f, 0.0f, 0.0f),
         vec3(0.0f, 0.0f, max_extent * 4.0f),
         material::EmissiveSpectrum(top_light_spec)
-    ));
+    ), IS_DIRECT_SAMPLE);
 
     std::vector<float> strip_spec = make_blackbody_spectrum(6500.0f);
     for (auto& v : strip_spec) v *= 70.0f;
@@ -79,7 +79,7 @@ inline void render_obj() {
             vec3(strip_w, 0.0f, 0.0f),
             vec3(0.0f, strip_h, 0.0f),
             strip_mat
-        ));
+        ), IS_DIRECT_SAMPLE);
     }
 
     std::vector<float> glow_spec = make_blackbody_spectrum(3000.0f);
@@ -90,7 +90,7 @@ inline void render_obj() {
         float x = bbox_center.x() + (random_float() - 0.5f) * max_extent * 4.0f;
         float y = ground_y + max_extent * 0.5f + random_float() * max_extent * 2.5f;
         float r = max_extent * (0.02f + random_float() * 0.06f);
-        world.add(sphere(Point(x, y, wall_z + max_extent * 0.1f), r, glow_mat));
+        world.add(sphere(Point(x, y, wall_z + max_extent * 0.1f), r, glow_mat),  IS_DIRECT_SAMPLE);
     }
 
 
@@ -114,7 +114,7 @@ inline void render_obj() {
         45.0f,
         16.0f / 9.0f,
         1260,
-        2048,
+        128,
         50
     );
 

@@ -10,7 +10,7 @@
 int main() {
 	// render_dispersion();
 	// render_bounding_ball();
-	render_refraction_rich();
-	// render_obj();
+	// render_refraction_rich();
+	render_obj();
 	// render_cornell_box();
 }

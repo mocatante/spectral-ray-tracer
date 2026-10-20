@@ -7,6 +7,8 @@
 #include "spectral.h"
 
 constexpr float  PI_F = 3.14159265358979323846f;
+constexpr float INV_FOUR_PI = 1.0f / (4.0f * PI_F);
+
 
 inline float random_float() {
     static thread_local std::mt19937 rng(std::random_device{}());
@@ -58,15 +60,20 @@ inline void build_onb(const vec3& n, vec3& t, vec3& b) {
         -n.y());
 }
 
-// 单位球内随机向量, 用于模糊镜面
-inline vec3 random_in_unit_sphere() {
-    while (true) {
-        vec3 p(random_float() * 2.0f - 1.0f,
-            random_float() * 2.0f - 1.0f,
-            random_float() * 2.0f - 1.0f);
-        if (p.dot(p) <= 1.0f) return p;
-    }
+
+// 球面均匀
+inline vec3 random_unit_vector() {
+    float z = 1.0f - 2.0f * random_float();
+    float r = std::sqrt(std::max(0.0f, 1.0f - z * z));
+    float phi = 2.0f * PI_F * random_float();
+    return vec3(r * std::cos(phi), r * std::sin(phi), z);
 }
+
+// 单位球内随机向量
+inline vec3 random_in_unit_sphere() {
+    return random_unit_vector() * std::cbrt(random_float());
+}
+
 
 // 均匀半球采样，PDF = 1 / (2π)
 inline Direction uniform_hemisphere(const vec3& n) {

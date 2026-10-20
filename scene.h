@@ -233,7 +233,7 @@ struct scene {
     bool is_bvh_built = false;
 
 
-    bool has_targets() const { return !direct_targets.empty(); }
+    bool has_targets() const { return !direct_targets.empty() && total_target_weight > 0.0f; }
 
     // 添加资产, 不会被渲染
     AssetRef add_asset(const sphere& s) {
@@ -273,24 +273,19 @@ struct scene {
     void add(const AssetRef& ref, const mat4& transform, DirectSampleFlag flag = NOT_DIRECT_SAMPLE, float weight = 1.0f) { add_impl(ref, transform, flag, weight); }
 
     // 直接采样方向
-    bool sample_direct_target(const Point& origin, Direction& out_dir) const {
-        if (direct_targets.empty() || total_target_weight <= 0.0f) return false;
-
+    // 前置条件: 调用方通过 has_targets() 保证 direct_targets 非空且 total_target_weight > 0
+    void sample_direct_target(const Point& origin, Direction& out_dir) const {
         // 加权随机选一个
         float r = random_float() * total_target_weight;
-        int picked = -1;
+        int picked = 0;
         for (int i = 0; i < (int)direct_targets.size(); ++i) {
             r -= direct_targets[i].weight;
             if (r <= 0.0f) { picked = i; break; }
         }
-        if (picked == -1) picked = (int)direct_targets.size() - 1;
-
-        return sample_primitive(direct_targets[picked], origin, out_dir);
+        sample_primitive(direct_targets[picked], origin, out_dir);
     }
     // 直接采样对应pdf
     float pdf_direct_target(const Point& origin, const Direction& dir) const {
-        if (direct_targets.empty() || total_target_weight <= 0.0f) return 0.0f;
-
         float total_pdf = 0.0f;
         for (const auto& t : direct_targets) {
             float p = pdf_primitive(t, origin, dir);
@@ -435,13 +430,21 @@ private:
     // hittable的精确pdf采样
     // 如果未实现, 则使用aabb外接球粗略采样
     // 更新hittable的pdf后需要手动更新此处switch
-    bool sample_primitive(const DirectTargetRef& t, const Point& origin, Direction& out_dir) const {
+    // 注意, 
+    // 约定图元的sample需要保证失败时退化为其它采样
+    void sample_primitive(const DirectTargetRef& t, const Point& origin, Direction& out_dir) const {
         switch (t.ref.type) {
-        case PRIM_SPHERE:   return spheres[t.ref.index].sample(origin, out_dir);
-        case PRIM_QUAD:     return quads[t.ref.index].sample(origin, out_dir);
+        case PRIM_SPHERE: {
+            spheres[t.ref.index].sample(origin, out_dir);
+            break;
+        }
+        case PRIM_QUAD: {
+            quads[t.ref.index].sample(origin, out_dir);
+            break;
+        }
         // 当新增精确pdf时添加
         default:
-            return sample_bounding_sphere(t, origin, out_dir);
+            sample_bounding_sphere(t, origin, out_dir);
         }
     }
 
@@ -459,10 +462,14 @@ private:
     }
 
     // aabb外接球采样
-    bool sample_bounding_sphere(const DirectTargetRef& t, const Point& origin, Direction& out_dir) const {
+    void sample_bounding_sphere(const DirectTargetRef& t, const Point& origin, Direction& out_dir) const {
         vec3 to_center = t.bound_center - origin;
         float dist2 = to_center.dot(to_center);
-        if (dist2 <= t.bound_radius * t.bound_radius) return false;
+        // 直接采样失败, 退化为均匀球面采样
+        if (t.bound_radius <= 1e-6f || dist2 <= t.bound_radius * t.bound_radius) {
+            out_dir = random_unit_vector();
+            return;
+        }
 
         vec3 w = to_center.normalize();
         vec3 u, v;
@@ -475,14 +482,16 @@ private:
 
         vec3 local_dir(sin_theta * std::cos(phi), sin_theta * std::sin(phi), cos_theta);
         out_dir = (u * local_dir.x() + v * local_dir.y() + w * local_dir.z()).normalize();
-        return true;
     }
 
     // aabb外接球采样概率
     float pdf_bounding_sphere(const DirectTargetRef& t, const Point& origin, const Direction& dir) const {
         vec3 to_center = t.bound_center - origin;
         float dist2 = to_center.dot(to_center);
-        if (dist2 <= t.bound_radius * t.bound_radius) return 0.0f;
+        // 退化情况, 均匀球面采样概率
+        if (t.bound_radius <= 1e-6f || dist2 <= t.bound_radius * t.bound_radius) {
+            return INV_FOUR_PI;
+        }
 
         float cos_theta_max = std::sqrt(std::max(0.0f, 1.0f - (t.bound_radius * t.bound_radius) / dist2));
         float solid_angle = 2.0f * PI_F * (1.0f - cos_theta_max);

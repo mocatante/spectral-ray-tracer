@@ -172,10 +172,11 @@ struct camera {
 
         // 材质使用pdf采样
         if (mat.use_pdf) {
-            // 用0.5混合直接采样
-            bool use_target = world->has_targets() && (random_float() < 0.5f);
-            // 抽取方向
             Direction new_dir;
+            // 用0.5混合直接采样(抛骰子决定是否直接采样)
+            bool use_target = (world->has_targets() && (random_float() < 0.5f));
+            // 抽取方向
+            
 
             if (use_target) {
                 world->sample_direct_target(rec.p, new_dir);   //直接采样

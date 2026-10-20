@@ -127,11 +127,14 @@ struct sphere {
     }
 
     // sphere的直接采样
-    bool sample(const Point& origin, Direction& out_dir) const {
+    void sample(const Point& origin, Direction& out_dir) const {
         vec3 to_center = center - origin;
         float dist2 = to_center.dot(to_center);
 
-        if (dist2 <= radius * radius + 1e-6f) return false;
+        if (radius <= 1e-6f || dist2 <= radius * radius + 1e-6f) {
+            out_dir = random_unit_vector();
+            return;
+        }
 
         vec3 w = to_center.normalize();
         vec3 u, v;
@@ -145,14 +148,15 @@ struct sphere {
 
         vec3 local_dir(sin_theta * std::cos(phi), sin_theta * std::sin(phi), cos_theta);
         out_dir = (u * local_dir.x() + v * local_dir.y() + w * local_dir.z()).normalize();
-        return true;
     }
     // sphere的直接采样pdf
     float pdf(const Point& origin, const Direction& dir) const {
         vec3 to_center = center - origin;
         float dist2 = to_center.dot(to_center);
 
-        if (dist2 <= radius * radius + 1e-6f) return 0.0f;
+        if (radius <= 1e-6f || dist2 <= radius * radius + 1e-6f) {
+            return INV_FOUR_PI;
+        }
 
         float cos_theta_max = std::sqrt(std::max(0.0f, 1.0f - (radius * radius) / dist2));
         float solid_angle = 2.0f * PI_F * (1.0f - cos_theta_max);
@@ -242,20 +246,25 @@ struct quad {
     }
 
     // quad的直接采样
-    bool sample(const Point& origin, Direction& out_dir) const {
-        if (inv_n_sq <= 0.0f) return false;
+    void sample(const Point& origin, Direction& out_dir) const {
+        // 退化四边形 或 origin 落在平面上
+        if (inv_n_sq <= 0.0f || std::abs(d - normal.dot(origin)) < 1e-4f) {
+            out_dir = random_unit_vector();
+            return;
+        }
 
         float r1 = random_float();
         float r2 = random_float();
 
         Point p_on_light = p + u * r1 + v * r2;
         out_dir = (p_on_light - origin).normalize();
-        return true;
     }
 
     // quad的直接采样pdf
     float pdf(const Point& origin, const Direction& dir) const {
-        if (inv_n_sq <= 0.0f) return 0.0f;
+        if (inv_n_sq <= 0.0f || std::abs(d - normal.dot(origin)) < 1e-4f) {
+            return INV_FOUR_PI;
+        }
 
         float denom = normal.dot(dir);
         if (std::abs(denom) < 1e-6f) return 0.0f;
