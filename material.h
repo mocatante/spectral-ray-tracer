@@ -9,7 +9,8 @@ enum MaterialType : int {
     MAT_DIFFUSE = 0,
     MAT_GLASS = 1,
     MAT_EMISSIVE = 2,
-    MAT_METAL = 3
+    MAT_METAL = 3,
+    MAT_DIFFUSE_U = 4   // 均匀采样对照版本
 };
 
 struct scatter_result {
@@ -22,6 +23,9 @@ struct scatter_result {
 struct material {
     MaterialType type;
 	
+    // 是否使用pdf采样
+    bool use_pdf = false;
+
     // 是否是光谱材质
     bool is_spectral = false;
 
@@ -64,6 +68,50 @@ struct material {
         return ior + dispersion / (l_um * l_um);
     }
 
+
+    // 生成采样方向
+    Direction sample_scatter(const vec3& n) const {
+        switch (type) {
+            case MAT_DIFFUSE:
+                return cosine_sample_hemisphere(n); // 余弦加权
+            case MAT_DIFFUSE_U:
+                return uniform_hemisphere(n);       // 均匀半球
+            default:
+                return uniform_hemisphere(n);
+        }
+    }
+
+    // 报告采样 PDF
+    float pdf_scatter(const vec3& n, const Direction& dir) const {
+        switch (type) {
+        case MAT_DIFFUSE: {
+            float cosT = dir.dot(n);
+            return cosT > 0.0f ? cosT / PI_F : 0.0f;    // 余弦加权
+        }
+        case MAT_DIFFUSE_U:
+            return 1.0f / (2.0f * PI_F);    // 均匀半球分布
+        default:
+            return 0.0f;
+        }
+    }
+
+    // 评估入射光线贡献权重
+    float eval_geometry_term(const vec3& n, const Direction& dir) const {
+        switch (type) {
+        case MAT_DIFFUSE:
+        case MAT_DIFFUSE_U: {
+            float cosT = dir.dot(n);
+            if (cosT <= 0.0f) return 0.0f;
+            // 物理上两者都是漫反射, 该权重需要物理推导
+            return cosT / PI_F;
+        }
+        default:
+            return 0.0f;
+        }
+    }
+
+
+    // Delta 分布散射（彻底删除了 MAT_DIFFUSE 分支）
     scatter_result scatter(const Direction& in_dir,
         const Point& p,
         const vec3& n,
@@ -73,18 +121,6 @@ struct material {
         scatter_result sr;
 
         switch (type) {
-
-            case MAT_DIFFUSE: {
-                Direction d = uniform_hemisphere(n);
-                float cosT = d.dot(n);
-                if (cosT <= 0.0f) return sr;
-
-                sr.scattered = true;
-                sr.dir = d;
-                sr.weight = 2.0f * cosT * albedoAt(lambda);
-                return sr;
-            }
-
             case MAT_GLASS: {
                 float current_ior = iorAt(lambda);
 
@@ -92,10 +128,10 @@ struct material {
                 float n2 = front_face ? current_ior : 1.0f;
                 float eta = n1 / n2;
 
-                float cos_theta = std::fmin((-1.0f*in_dir).dot(n), 1.0f);
+                float cos_theta = std::fmin((-1.0f * in_dir).dot(n), 1.0f);
                 float sin_theta = std::sqrt(1.0f - cos_theta * cos_theta);
-                
-				// 全反射
+
+                // 全反射
                 bool cannot_refract = eta * sin_theta > 1.0f;
                 Direction direction;
 
@@ -111,9 +147,6 @@ struct material {
                 sr.weight = 1.0f;
                 return sr;
             }
-            case MAT_EMISSIVE: {
-                return sr;
-            }
             case MAT_METAL: {
                 vec3 reflected = reflect(in_dir.normalize(), n);
                 sr.dir = (reflected + random_in_unit_sphere() * fuzz).normalize();
@@ -125,19 +158,27 @@ struct material {
                 sr.weight = albedoAt(lambda);
                 return sr;
             }
-            default: {
-				return sr; // 默认不散射
+            case MAT_EMISSIVE: {
+                return sr;
             }
-            return sr;
+            default: {
+                return sr;
+            }
         }
     }
 
 
     static material Diffuse(const Color& c) {
-        material m{};m.type = MAT_DIFFUSE;m.albedo = c;m.emission = Color(0, 0, 0);m.ior = 1.0f;return m;
+        material m{}; m.use_pdf = true; m.type = MAT_DIFFUSE;m.albedo = c;m.emission = Color(0, 0, 0);m.ior = 1.0f;return m;
     }
     static material DiffuseSpectrum(const std::vector<float>& spec) {
-        material m{}; m.type = MAT_DIFFUSE; m.is_spectral = true; m.spectral_albedo = spec; return m;
+        material m{}; m.use_pdf = true; m.type = MAT_DIFFUSE; m.is_spectral = true; m.spectral_albedo = spec; return m;
+    }
+    static material Diffuse_U(const Color& c) {
+        material m{}; m.use_pdf = true; m.type = MAT_DIFFUSE_U; m.albedo = c; m.emission = Color(0, 0, 0); m.ior = 1.0f; return m;
+    }
+    static material DiffuseSpectrum_U(const std::vector<float>& spec) {
+        material m{}; m.use_pdf = true; m.type = MAT_DIFFUSE_U; m.is_spectral = true; m.spectral_albedo = spec; return m;
     }
 
     static material Glass(float ior_base, float disp = 0.0f) {
