@@ -1,4 +1,3 @@
-<img width="906" height="906" alt="preview4" src="https://github.com/user-attachments/assets/ca0d9a7e-2ea7-4480-a356-1cb56837c2f7" />
 # spectral-ray-tracer
 A minimalist C++ spectral path tracer based on RTIOW, featuring BVH, Cauchy dispersion ,Direct Light Sampling and CUDA-ready structs.
 基于 RTIOW 改造的极简 C++ 光谱路径追踪器，包含BVH, 柯西色散, 直接光采样与面向CUDA的struct设计。
@@ -7,6 +6,7 @@ A minimalist C++ spectral path tracer based on RTIOW, featuring BVH, Cauchy disp
 <img width="1260" height="709" alt="preview1" src="https://github.com/user-attachments/assets/3cf967f3-9939-4b4d-9591-3e34022cc87d" />
 <img width="1260" height="709" alt="ecbe21d283776bfcf69a70ad25159540" src="https://github.com/user-attachments/assets/25f15ae4-aeee-4907-bbfc-85a6d821ba36" />
 <img width="800" height="800" alt="preview3" src="https://github.com/user-attachments/assets/e949368f-78ee-434c-915d-66edc9af79e0" />
+<img width="906" height="906" alt="preview4" src="https://github.com/user-attachments/assets/ca0d9a7e-2ea7-4480-a356-1cb56837c2f7" />
 
 
 
