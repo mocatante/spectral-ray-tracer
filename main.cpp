@@ -7,6 +7,7 @@
 #include "scene_refraction_rich.h"
 #include "scene_obj.h"
 #include "scene_lamp_box.h"
+#include "scene_nested_glass.h"
 
 int main() {
 	// render_dispersion();
@@ -14,5 +15,6 @@ int main() {
 	// render_refraction_rich();
 	// render_obj();
 	// render_cornell_box();
-	render_lamp_box();
+	// render_lamp_box();
+	render_nested_glass();
 }
