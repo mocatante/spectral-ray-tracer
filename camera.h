@@ -12,6 +12,11 @@
 #include "scene.h"
 #include "material.h"
 
+
+constexpr int   RR_START_DEPTH = 3;
+constexpr float RR_MAX_SURVIVE = 0.95f;
+constexpr float RR_MIN_SURVIVE = 0.05f;
+
 struct camera {
     int samples_per_pixel;
 
@@ -155,7 +160,7 @@ struct camera {
         int           max_depth) const
     {
         if (depth >= max_depth) return 0.0f;
-
+        
         hit_record rec;
 
         // 未命中
@@ -197,6 +202,13 @@ struct camera {
             float albedo = mat.albedoAt(lambda);
             float newThroughput = throughput * albedo * (geo_term / p_mix);
             if (newThroughput <= 0.0f) return 0.0f;
+
+            // RR 暂时只加在这里
+            if (depth + 1 >= RR_START_DEPTH && newThroughput < RR_MAX_SURVIVE) {
+                float p = std::max(newThroughput, RR_MIN_SURVIVE);
+                if (random_float() >= p) return 0.0f;
+                newThroughput /= p;
+            }
 
             // 递归追踪
             Point newOrigin = rec.p + new_dir * 1e-3f;

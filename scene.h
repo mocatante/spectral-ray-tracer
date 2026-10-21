@@ -272,6 +272,16 @@ struct scene {
     // 用已有资产加变换添加, 包装成 Instance, 会被渲染
     void add(const AssetRef& ref, const mat4& transform, DirectSampleFlag flag = NOT_DIRECT_SAMPLE, float weight = 1.0f) { add_impl(ref, transform, flag, weight); }
 
+    // 添加不被渲染的采样目标, 仅用于指导光线
+    void add_sampling_only(const AssetRef& ref, float weight = 1.0f) {
+        register_target(ref, weight);
+    }
+    // 添加不被渲染的带变换采样目标, 仅用于指导光线.注意instance会降低直接采样效果
+    void add_sampling_only(const AssetRef& ref, const mat4& transform, float weight = 1.0f) {
+        int inst_idx = add_instance_impl(ref.type, ref.index, transform);
+        register_target({ PRIM_INSTANCE, inst_idx }, weight);
+    }
+
     // 直接采样方向
     // 前置条件: 调用方通过 has_targets() 保证 direct_targets 非空且 total_target_weight > 0
     void sample_direct_target(const Point& origin, Direction& out_dir) const {
@@ -418,14 +428,7 @@ private:
         objects.push_back(inst_ref);
         if (isTarget == IS_DIRECT_SAMPLE) register_target(inst_ref, weight);
     }
-
-    // 注册直接采样目标
-    void register_direct_target(const AssetRef& ref, float weight) {
-        aabb b = get_primitive_aabb(ref);
-        if (b.min.x() > b.max.x()) return;
-        direct_targets.push_back({ ref, weight, b.center(), b.get_sphere_radius() });
-        total_target_weight += weight;
-    }
+    
 
     // hittable的精确pdf采样
     // 如果未实现, 则使用aabb外接球粗略采样

@@ -6,11 +6,13 @@
 #include "scene_cornell_box.h"
 #include "scene_refraction_rich.h"
 #include "scene_obj.h"
+#include "scene_lamp_box.h"
 
 int main() {
 	// render_dispersion();
 	// render_bounding_ball();
 	// render_refraction_rich();
-	render_obj();
+	// render_obj();
 	// render_cornell_box();
+	render_lamp_box();
 }
