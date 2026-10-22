@@ -142,9 +142,9 @@ struct camera {
                     / SpectralColor::kXYZIntegralNormalization;
 
                 Color linearRGB = SpectralColor::xyzToLinearSRGB(accumulatedXYZ);
-                Color srgb = SpectralColor::linearToSRGB(linearRGB);
+                //Color srgb = SpectralColor::linearToSRGB(linearRGB);
 
-                framebuffer[static_cast<size_t>(j) * width + i] = srgb;
+                framebuffer[static_cast<size_t>(j) * width + i] = linearRGB;
             }
 		}
         // 输出BMP
@@ -224,7 +224,7 @@ struct camera {
         return trace(world, ray(newOrigin, sr.dir), lambda, newThroughput, depth + 1, max_depth);
     }
 
-
+    // 接收线性值
     void toBMP(const std::vector<Color>& framebuffer,
         int w, int h,
         const char* filename = "output.bmp") const
@@ -274,10 +274,11 @@ struct camera {
         const uint8_t pad[3] = { 0, 0, 0 };
         for (int j = h - 1; j >= 0; --j) {
             for (int i = 0; i < w; ++i) {
-                const Color& c = framebuffer[static_cast<size_t>(j) * w + i];
-                uint8_t r = static_cast<uint8_t>(255.0f * std::clamp(c.x(), 0.0f, 1.0f) + 0.5f);
-                uint8_t g = static_cast<uint8_t>(255.0f * std::clamp(c.y(), 0.0f, 1.0f) + 0.5f);
-                uint8_t b = static_cast<uint8_t>(255.0f * std::clamp(c.z(), 0.0f, 1.0f) + 0.5f);
+                const Color& linear = framebuffer[static_cast<size_t>(j) * w + i];
+                Color srgb = SpectralColor::linearToSRGB(linear);
+                uint8_t r = static_cast<uint8_t>(255.0f * srgb.x() + 0.5f);   // srgb 已在 [0,1]
+                uint8_t g = static_cast<uint8_t>(255.0f * srgb.y() + 0.5f);
+                uint8_t b = static_cast<uint8_t>(255.0f * srgb.z() + 0.5f);
                 out.put(static_cast<char>(b));
                 out.put(static_cast<char>(g));
                 out.put(static_cast<char>(r));
